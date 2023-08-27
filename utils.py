@@ -201,12 +201,19 @@ def add_audio_from_video(video_path, audio_video_path, output_path):
         output_path
     ]
     subprocess.run(ffmpeg_cmd, check=True)
-def get_nth_frame(cap, number):
-    cap.set(cv2.CAP_PROP_POS_FRAMES, number)
+def get_nth_frame(cap, number, type=0):
+    #type 0 video
+    #type 1 camera
+    #type 2 image
+    if type == 0:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, number)
     ret, frame = cap.read()
     if ret:
         return frame
     return None
+def reset_cap(cap):
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    return cap
 class ThreadWithReturnValue(Thread):
     def __init__(self, group=None, target=None, name=None,
                 args=(), kwargs={}, Verbose=None):
@@ -539,6 +546,69 @@ def create_batch_cap(file):
     frame_number = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     return [cap, fps, width, height, out, name, file, frame_number]
 
+def create_new_cap(file, face_, output_,batch_post=""):
+    if globalsz.args['camera_fix'] == True:
+        cap = cv2.VideoCapture(file, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(file)
+    if isinstance(file, int):
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, globalsz.width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, globalsz.height)
+    fourcc = cv2.VideoWriter_fourcc(*'H265')
+    cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+    # Get the video's properties
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    output_filename = os.path.basename(output_)
+    name = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}")
+    name_temp = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}_temp.mp4")#f"{args['output']}_temp{args['batch']}.mp4"
+    out = cv2.VideoWriter(name_temp, fourcc, fps, (width, height))
+    frame_number = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    #face_ = 
+    return {"type": 1,
+            "cap":cap,
+            "original_image":None,
+            "swapped_image":None,
+            "target_path":file,
+            "save_path":name,
+            "save_temp_path":name_temp,
+            "current_frame_index":0,
+            "old_number":-1,
+            "frame_number":frame_number,
+            "rendering":False,
+            "width":width,
+            "height":height,
+            "fps":fps,
+            "faces_to_swap":None,
+            "settings":{
+                "threads":None,
+                "enable_swapper": not globalsz.args['no_faceswap'],
+                "enable_enhancer": False,
+                "enhancer_choice": "none",
+                "bbox_adjust": [50, 50, 50, 50],
+                "codeformer_fidelity":0.1,
+                "blender":1.0,
+                "codeformer_skip_if_no_face": False,
+                "codeformer_upscale_face": True,
+                "codeformer_enhancer_background": False,
+                "codeformer_upscale_amount":1,
+                },
+            "out_settings_for_resetting":{
+                "name_temp":name_temp,
+                "fourcc":fourcc,
+                "fps":fps,
+                "width":width,
+                "height":height,
+            },
+            "out":out,
+            "count":-1,
+            "first_frame":get_nth_frame(cap, 0),
+            "temp": [],
+            "face":face_
+            }
+
 def get_gpu_amount():
     num_devices = -1
     if torch.cuda.is_available() and globalsz.cuda:
@@ -606,8 +676,11 @@ def prepare_swappers_and_analysers(args):
                     from swapperfp16 import get_model
                 swappers.append(get_model("inswapper_128.quant.onnx", session_options=sess_options, providers=providers))
             else:
-                swappers.append(insightface.model_zoo.get_model("inswapper_128.onnx", session_options=sess_options, providers=providers))
-        else:
+                
+                if globalsz.args['fastload']:
+                    from swapperfp16 import get_model
+                swappers.append(get_model("inswapper_128.onnx", session_options=sess_options, providers=providers))
+        else: #insightface.model_zoo.
             swappers.append(None)
 
         analysers.append(insightface.app.FaceAnalysis(name='buffalo_l',allowed_modules=["recognition", "detection"], providers=providers, session_options=sess_options))
