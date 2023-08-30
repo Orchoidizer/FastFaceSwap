@@ -76,6 +76,8 @@ from utils import *
 videos = []
 current_video = 0 #id of video
 target_embedding = None
+clip_neg_prompt = ""
+clip_pos_prompt = ""
 '''
 how video is
 types:
@@ -226,7 +228,7 @@ def on_closing():
 
 while True:
     if not args['cli']:
-        from thatrandomfilethatneverwillbedeleted import ScrolledListBox
+        from thatrandomfilethatneverwillbedeleted import ScrolledListBox, ScrolledListBox_horizontal
         import tkinter as tk
         from tkinter import ttk
         from tkinter.filedialog import asksaveasfilename, askdirectory, askopenfilename
@@ -409,7 +411,7 @@ while True:
                 return sz"""
 
         root = tk.Tk()
-
+        root.state('zoomed')
         style = ttk.Style()
         # Set the theme to "clam"
         style.theme_use("clam")
@@ -462,6 +464,10 @@ while True:
         show_bbox.grid(row=row_counter, column=0)
         row_counter += 1
         
+        realtime_updater_var = tk.IntVar()
+        realtime_updater = ttk.Checkbutton(left_frame, text="realtime updater", variable=realtime_updater_var, style="TCheckbutton")
+        realtime_updater.grid(row=row_counter, column=0)
+        row_counter += 1
         if not isinstance(args['target_path'], int):
             progress_label = tk.Label(left_frame, fg=text_color, bg=background_color)
             progress_label.grid(row=row_counter, column=0)
@@ -550,11 +556,55 @@ while True:
             videos[current_video]['out'] = cv2.VideoWriter(videos[current_video]['out_settings_for_resetting']['name_temp'], videos[current_video]['out_settings_for_resetting']['fourcc'], 
                                                            videos[current_video]['out_settings_for_resetting']['fps'], (videos[current_video]['out_settings_for_resetting']['width'], videos[current_video]['out_settings_for_resetting']['height']))
 
-        show_external_swapped_preview_var = tk.IntVar()
+        
+        original_image_second_open = False
+        swapped_image_second_open = False
+
+        def on_closing_original_image_second():
+            global original_image_second_window, original_image_second_open
+            original_image_second_open = False
+            original_image_second_window.destroy()
+        def on_closing_swapped_image_second():
+            global swapped_image_second_window, swapped_image_second_open
+            swapped_image_second_open = False
+            swapped_image_second_window.destroy()
+        def open_original_image_second():
+            global original_image_label_second, original_image_second_window,original_image_second_open
+            if not original_image_second_open:
+                original_image_second_window = tk.Toplevel(root, bg=background_color)
+                original_image_second_window.protocol("WM_DELETE_WINDOW", on_closing_original_image_second)
+                original_image_second_window.geometry("640x360")
+                original_image_second_window.title("Original image")
+                original_image_label_second = tk.Label(original_image_second_window,bg=background_color)
+                original_image_label_second.pack(fill=tk.BOTH, expand=True)
+                original_image_second_open = True
+            else:
+                original_image_second_window.lift()
+        def open_swapped_image_second():
+            global swapped_image_label_second, swapped_image_second_window ,swapped_image_second_open
+            if not swapped_image_second_open:
+                swapped_image_second_window = tk.Toplevel(root, bg=background_color)
+                swapped_image_second_window.protocol("WM_DELETE_WINDOW", on_closing_swapped_image_second)
+                swapped_image_second_window.geometry("640x360")
+                swapped_image_second_window.title("Swapped image")
+                swapped_image_label_second = tk.Label(swapped_image_second_window,bg=background_color)
+                swapped_image_label_second.pack(fill=tk.BOTH, expand=True)
+                swapped_image_second_open = True
+            else:
+                swapped_image_second_window.lift()
+        open_frames_frame = tk.Frame(left_frame, bg=background_color)
+        open_frames_frame.grid(row=row_counter, column=0, pady=10, sticky="ew")
+        row_counter += 1
+        open_original_image_second_button = tk.Button(open_frames_frame, text='open original preview', bg=button_color, fg=text_color, command=open_original_image_second)
+        open_original_image_second_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        open_swapped_image_second_button = tk.Button(open_frames_frame, text='open swapped preview', bg=button_color, fg=text_color, command=open_swapped_image_second)
+        open_swapped_image_second_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        '''show_external_swapped_preview_var = tk.IntVar()
         show_external_swapped_preview = ttk.Checkbutton(left_frame, text="Show swapped frame in another window", variable=show_external_swapped_preview_var, style="TCheckbutton")
         show_external_swapped_preview.grid(row=row_counter, column=0)
         show_external_swapped_preview_var.set(0)
-        row_counter += 1
+        row_counter += 1'''
         def unselect_face():
             global target_embedding, old_index, args, videos
             args['selective'] = ''
@@ -575,12 +625,33 @@ while True:
             else:
                 advanced_section_frame.grid(row=menu_counter, column=0, pady=10)
             menu_visible = not menu_visible
-        show_advanced_settings = tk.Button(left_frame, text='Toggle advanced settings', bg=button_color, fg=text_color, command=toggle_menu)
-        show_advanced_settings.grid(row=row_counter, column=0)
+        occluder_checkbox_var = tk.IntVar()
+        occluder_checkbox = ttk.Checkbutton(left_frame, text="Use occluder", variable=occluder_checkbox_var, style="TCheckbutton")
+        occluder_checkbox.grid(row=row_counter, column=0)
+        occluder_checkbox_var.set(1)
         row_counter += 1
         
+        toggle_frame_ = tk.Frame(left_frame, bg=background_color)
+        toggle_frame_.grid(row=row_counter, column=0, sticky="ew")
+        row_counter += 1
+        show_advanced_settings = tk.Button(toggle_frame_, text='Toggle advanced settings', bg=button_color, fg=text_color, command=toggle_menu)
+        show_advanced_settings.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        row_counter += 1
+        
+        def toggle_clip_menu():
+            global clip_menu_visible
+            if clip_menu_visible:
+                clip_frame.grid_remove()
+            else:
+                clip_frame.grid(row=clip_menu_counter, column=0, pady=10)
+            clip_menu_visible = not clip_menu_visible
+            
+        show_clip_settings = tk.Button(toggle_frame_, text='Toggle CLIP settings', bg=button_color, fg=text_color, command=toggle_clip_menu)
+        show_clip_settings.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        row_counter += 1
         advanced_section_frame = tk.LabelFrame(left_frame, text="Advanced settings", bg=background_color, fg=text_color)
         advanced_section_frame.grid(row=row_counter, column=0, pady=10, sticky="nsew")
+        advanced_section_frame.grid_columnconfigure(0, weight=1)
         menu_visible = True
         menu_counter = row_counter
         row_counter += 1
@@ -590,42 +661,45 @@ while True:
         label = tk.Label(advanced_section_frame, text="bounding box adjustment", fg=text_color, bg=background_color)
         label.grid(row=row_counter, column=0)
         row_counter += 1
-        
-        label = tk.Label(advanced_section_frame, text="up", fg=text_color, bg=background_color)
-        label.grid(row=row_counter, column=0)
+
+        up_frame = tk.Frame(advanced_section_frame, bg=background_color)
+        up_frame.grid(row=row_counter, column=0, rowspan=1, sticky="ew")
         row_counter += 1
-        
-        entry_y1 = tk.Entry(advanced_section_frame)
-        entry_y1.grid(row=row_counter, column=0)
+        label = tk.Label(up_frame, text="up", fg=text_color, bg=background_color, width=10)
+        label.pack(side=tk.LEFT, fill=tk.X)#, expand=True)
+        entry_y1 = tk.Entry(up_frame)
+        entry_y1.pack(side=tk.LEFT, fill=tk.X, expand=True)
         entry_y1.insert(0, adjust_y1)
+        
+        right_frame = tk.Frame(advanced_section_frame, bg=background_color)
+        right_frame.grid(row=row_counter, column=0, rowspan=1, sticky="ew")
+        label = tk.Label(right_frame, text="right", fg=text_color, bg=background_color, width=10)
+        label.pack(side=tk.LEFT, fill=tk.X)#, expand=True)
         row_counter += 1
         
-        label = tk.Label(advanced_section_frame, text="right", fg=text_color, bg=background_color)
-        label.grid(row=row_counter, column=0)
-        row_counter += 1
-        
-        entry_x2 = tk.Entry(advanced_section_frame)
-        entry_x2.grid(row=row_counter, column=0)
+        entry_x2 = tk.Entry(right_frame)
+        entry_x2.pack(side=tk.LEFT, fill=tk.X, expand=True)
         entry_x2.insert(0, adjust_x2)
+        
+        left__frame = tk.Frame(advanced_section_frame, bg=background_color)
+        left__frame.grid(row=row_counter, column=0, rowspan=1, sticky="ew")
+        label = tk.Label(left__frame, text="left", fg=text_color, bg=background_color, width=10)
+        label.pack(side=tk.LEFT, fill=tk.X)#, expand=True)
         row_counter += 1
         
-        label = tk.Label(advanced_section_frame, text="left", fg=text_color, bg=background_color)
-        label.grid(row=row_counter, column=0)
-        row_counter += 1
-        
-        entry_x1 = tk.Entry(advanced_section_frame)
-        entry_x1.grid(row=row_counter, column=0)
+        entry_x1 = tk.Entry(left__frame)
+        entry_x1.pack(side=tk.LEFT, fill=tk.X, expand=True)
         entry_x1.insert(0, adjust_x1)
+        
+        down_frame = tk.Frame(advanced_section_frame, bg=background_color)
+        down_frame.grid(row=row_counter, column=0, rowspan=1, sticky="ew")
+        label = tk.Label(down_frame, text="down", fg=text_color, bg=background_color, width=10)
+        label.pack(side=tk.LEFT, fill=tk.X)#, expand=True)
         row_counter += 1
         
-        label = tk.Label(advanced_section_frame, text="down", fg=text_color, bg=background_color)
-        label.grid(row=row_counter, column=0)
-        row_counter += 1
-        
-        entry_y2 = tk.Entry(advanced_section_frame)
-        entry_y2.grid(row=row_counter, column=0)
+        entry_y2 = tk.Entry(down_frame)
+        entry_y2.pack(side=tk.LEFT, fill=tk.X, expand=True)
         entry_y2.insert(0, adjust_y2)
-        row_counter += 1
         
         button = tk.Button(advanced_section_frame, text="Set Values", bg=button_color, fg=text_color, command=set_adjust_value)
         button.grid(row=row_counter, column=0)
@@ -649,7 +723,7 @@ while True:
         row_counter += 1
         
         codeformer_slider = tk.Scale(advanced_section_frame, from_=0.1, to=2.0, resolution=0.1,  orient=tk.HORIZONTAL, fg=text_color, bg=background_color, command=on_codeformer_slider_move)
-        codeformer_slider.grid(row=row_counter, column=0)
+        codeformer_slider.grid(row=row_counter, column=0, sticky='ew', padx=10)
         row_counter += 1
         
         alpha = 1.0
@@ -657,13 +731,25 @@ while True:
             global alpha
             alpha = float(value)
         
-        label = tk.Label(advanced_section_frame, text="blender", fg=text_color, bg=background_color)
+        label = tk.Label(advanced_section_frame, text="original/final blend", fg=text_color, bg=background_color)
         label.grid(row=row_counter, column=0)
         row_counter += 1
         
         alpha_slider = tk.Scale(advanced_section_frame, from_=0.0, to=1.0, resolution=0.1, fg=text_color, bg=background_color,  orient=tk.HORIZONTAL, command=alpha_slider_move)
-        alpha_slider.grid(row=row_counter, column=0)
+        alpha_slider.grid(row=row_counter, column=0, sticky='ew', padx=10)
         alpha_slider.set(1.0)
+        row_counter += 1
+        label = tk.Label(advanced_section_frame, text="swapped/upscaled blend", fg=text_color, bg=background_color)
+        label.grid(row=row_counter, column=0)
+        row_counter += 1
+        
+        alpha2 = 1.0
+        def alpha_slider_move(value):
+            global alpha2
+            alpha2 = float(value)
+        alpha_slider2 = tk.Scale(advanced_section_frame, from_=0.0, to=1.0, resolution=0.1, fg=text_color, bg=background_color,  orient=tk.HORIZONTAL, command=alpha_slider_move)
+        alpha_slider2.grid(row=row_counter, column=0, sticky='ew', padx=10)
+        alpha_slider2.set(1.0)
         row_counter += 1
         
         codeformer_skip_if_no_face_var = tk.IntVar()
@@ -688,29 +774,199 @@ while True:
             codeformer_upscale_amount_value = int(value)
         
         codeformer_upscale_amount = tk.Scale(advanced_section_frame, from_=1, to=3, resolution=1, fg=text_color, bg=background_color, orient=tk.HORIZONTAL, command=codeformer_upscale_amount_move)
-        codeformer_upscale_amount.grid(row=row_counter, column=0)
+        codeformer_upscale_amount.grid(row=row_counter, column=0, sticky='ew', padx=10)
         codeformer_upscale_amount.set(1)
         row_counter += 1
         
-        label = tk.Label(advanced_section_frame, text="codeformer settings finished", fg=text_color, bg=background_color)
-        label.grid(row=row_counter, column=0)
+        #label = tk.Label(advanced_section_frame, text="codeformer settings finished", fg=text_color, bg=background_color)
+        #label.grid(row=row_counter, column=0)
+        #row_counter += 1
+        clean_cache_button = tk.Button(advanced_section_frame, text="Clean VRAM", bg=button_color, fg=text_color, command=lambda:torch.cuda.empty_cache())
+        clean_cache_button.grid(row=row_counter, column=0)
         row_counter += 1
+        clip_frame = tk.LabelFrame(left_frame, text="CLIP settings", bg=background_color, fg=text_color)
+        clip_frame.grid(row=row_counter, column=0, pady=10, sticky="nsew")
+        clip_menu_visible = True
+        clip_menu_counter = row_counter
+        row_counter += 1
+
+        enable_clip_var = tk.IntVar()
+        enable_clip_ckeck = ttk.Checkbutton(clip_frame, text="Enable clip", variable=enable_clip_var, style="TCheckbutton")
+        enable_clip_ckeck.pack(expand=True)#).grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+        
+        label = tk.Label(clip_frame, text="positive prompt:", fg=text_color, bg=background_color)
+        label.pack(expand=True)#.grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+        
+        entry_clip_pos = tk.Entry(clip_frame)
+        entry_clip_pos.pack(expand=True, fill=tk.X)#.grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+        
+        label = tk.Label(clip_frame, text="negative prompt:", fg=text_color, bg=background_color)
+        label.pack(expand=True)#.grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+        
+        entry_clip_neg = tk.Entry(clip_frame)
+        entry_clip_neg.pack(expand=True, fill=tk.X)#.grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+
+        def update_clip_values():
+            global clip_neg_prompt, clip_pos_prompt
+            clip_neg_prompt = entry_clip_neg.get()
+            clip_pos_prompt = entry_clip_pos.get()
+        button = tk.Button(clip_frame, text="Update CLIP values", bg=button_color, fg=text_color, command=update_clip_values)
+        button.pack(expand=True)#.grid(row=row_counter, column=0, sticky='ew')
+        row_counter += 1
+
+
+
         expander = tk.Label(left_frame, text=f"⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀", fg=text_color, bg=background_color)
         expander.grid(row=row_counter, column=0, sticky="ew")
         row_counter += 1
-        occluder_checkbox_var = tk.IntVar()
-        occluder_checkbox = ttk.Checkbutton(advanced_section_frame, text="Use occluder", variable=occluder_checkbox_var, style="TCheckbutton")
-        occluder_checkbox.grid(row=row_counter, column=0)
-        occluder_checkbox_var.set(1)
+        def open_face_chooser():
+            face_chooser_window = tk.Toplevel(root, bg=background_color)
+            face_chooser_window.geometry("640x560")
+            face_chooser_window.grid_rowconfigure(0, weight=1)
+            face_chooser_window.grid_columnconfigure(0, weight=1)
+            face_chooser_window.grid_rowconfigure(1, weight=1)
+
+            video_faces = tk.Frame(face_chooser_window, bg=background_color)
+            video_faces.grid(row=0, column=0, sticky="ew")
+            video_faces.grid_rowconfigure(0, weight=1)
+            video_faces.grid_columnconfigure(0, weight=1)
+            faces_listbox = ScrolledListBox_horizontal(video_faces)
+            faces_listbox.configure(background=background_color)
+            faces_listbox.selector_color = selector_color
+            faces_listbox.text_color = text_color
+            faces_listbox.grid(row=0, column=0, sticky="nsew")
+            added_faces = tk.Frame(face_chooser_window, bg=background_color)
+            added_faces.grid(row=1, column=0, sticky="ew")
+            added_faces.grid_rowconfigure(0, weight=1)
+            added_faces.grid_columnconfigure(0, weight=1)
+            faces_listbox2 = ScrolledListBox_horizontal(added_faces)
+            faces_listbox2.configure(background=background_color)
+            faces_listbox2.selector_color = selector_color
+            faces_listbox2.text_color = text_color
+            faces_listbox2.grid(row=0, column=0, sticky="nsew")
+            faces_listbox2.other_widget = faces_listbox
+            faces_listbox.other_widget = faces_listbox2
+            face_chooser_window.update_idletasks()
+            '''# Load some sample image pairs
+            left_image_paths = ["face.jpg", "rick.png"]
+            right_image_paths = left_image_paths[::-1]
+            
+            right_images = [Image.open(image_path) for image_path in left_image_paths]
+            left_images = ["1", "2", "3"]
+            
+            # Insert data into the ScrolledImageList
+            image_pair_list = list(zip(left_images, right_images))
+            faces_listbox.insert_data(image_pair_list)
+            faces_listbox2.insert_data(image_pair_list)
+            faces_listbox2.add_item("banana", right_images[0])
+            faces_listbox2.add_item("banana2", right_images[0])
+            faces_listbox2.add_item("banana3", right_images[0])'''
+            def find_and_add_faces():
+                try:
+                    image = original_image_label.image
+                    image_width = image.width()
+                    image_height = image.height()
+                    #print(relative_x, relative_y)
+                    bboxes = []
+                    faces = face_analysers[0].get(videos[current_video]['original_image'])
+                    for face in faces:    
+                        bboxes.append([face.bbox, face])
+                    height, width = videos[current_video]['original_image'].shape[:2]
+                    images = []
+                    for bbox, face in bboxes:
+                        images.append([Image.fromarray(cv2.cvtColor(videos[current_video]['original_image'][int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])], cv2.COLOR_BGR2RGB)), face])
+                    good_images = []
+                    for i, f in images:
+                        allowed = True
+                        a = f.normed_embedding
+                        for (_, _, tt) in faces_listbox.data_list:
+                            _, allow = compute_cosine_distance(a,tt , 0.75)
+                            if allow:
+                                allowed = False
+                                break
+                        if allowed:
+                            faces_listbox.add_item("unselected", i, a)
+                    
+                #for i in image_pair_list:
+                #    faces_listbox2.add_item(*i)
+                #faces_listbox2.insert_data(image_pair_list)
+                except Exception as e:
+                    print(f"HUSTON, WE HAD A PROBLEM AT FINDING FACES: {e}")
+            find_faces_in_frame_button = tk.Button(face_chooser_window, text="Find faces", bg=button_color, fg=text_color, command=find_and_add_faces)
+            find_faces_in_frame_button.grid(row=2, column=0)
+        buttonxx = tk.Button(left_frame, text="Choose faces", bg=button_color, fg=text_color, command=open_face_chooser)
+        buttonxx.grid(row=row_counter, column=0)
         row_counter += 1
         
         #=============================================
         #render_button.grid(row=34, column=0)
+        right_frame1 = tk.LabelFrame(root, text="Original frame", bg=background_color, highlightthickness=2, highlightbackground=border_color, fg=text_color)
+        right_frame2 = tk.LabelFrame(root, text="Swapped frame", bg=background_color, highlightthickness=2, highlightbackground=border_color, fg=text_color)
+        ui_vertical = 0
+        show_orig = 1
+        show_swapped = 1
+        def update_ui(clicked=0):
+            global right_frame1, right_frame2, ui_vertical, show_orig, show_swapped
+            if clicked == 0:
+                ui_vertical = not ui_vertical
+            if clicked == 1:
+                show_orig = not show_orig
+            if clicked == 2:
+                show_swapped = not show_swapped
+            right_frame1.grid_remove()
+            right_frame2.grid_remove()
+            left_frame.grid_remove()
+            if show_orig:
+                show_hide_original_button.configure(text="Hide original video")
+                right_frame1.grid(row=0, column=1, columnspan=1+(not ui_vertical), rowspan = 1 +ui_vertical, sticky="nsew")
+            else:
+                show_hide_original_button.configure(text="Show original video")
+            if show_swapped:
+                show_hide_swapped_button.configure(text="Hide swapped video")
+                right_frame2.grid(row=0+(not ui_vertical), column=1+ui_vertical, columnspan=1+(not ui_vertical), rowspan = 1 +ui_vertical, sticky="nsew")
+            else:
+                show_hide_swapped_button.configure(text="Show swapped video")
+            left_frame.grid(row=0, column=3, rowspan=2, sticky="ns")
+            right_frame1.grid_propagate(True)
+            right_frame2.grid_propagate(True)
+            if ui_vertical:   
+                root.grid_columnconfigure(0, weight=1)
+                root.grid_columnconfigure(1, weight=4*show_orig)
+                root.grid_columnconfigure(2, weight=4*show_swapped)
+                root.grid_columnconfigure(3, weight=1)
+                root.grid_rowconfigure(0, weight=1) 
+                root.grid_rowconfigure(1, weight=1)             
+            
+            else:
+                root.grid_columnconfigure(0, weight=1)
+                root.grid_columnconfigure(1, weight=4)
+                root.grid_columnconfigure(2, weight=4)
+                root.grid_columnconfigure(3, weight=1)
+                root.grid_rowconfigure(0, weight=show_orig) 
+                root.grid_rowconfigure(1, weight=show_swapped)
+            right_frame1.grid_propagate(False)
+            right_frame2.grid_propagate(False)
+            root.update_idletasks()
+            root.update()
         
-        right_frame1 = tk.Frame(root, bg=background_color, highlightthickness=2, highlightbackground=border_color)
-        right_frame2 = tk.Frame(root, bg=background_color, highlightthickness=2, highlightbackground=border_color)
-        original_image_label = tk.Label(right_frame1, text="Original frame placeholder")
-        swapped_image_label = tk.Label(right_frame2, text="Swapped frame placeholder")
+        UI_button_frame = tk.Frame(left_frame, bg=background_color)
+        UI_button_frame.grid(row=row_counter, column=0, sticky="ew")
+        row_counter += 1
+        make_vertical_button = tk.Button(UI_button_frame, text="vertical/horizontal video", bg=button_color, fg=text_color, command=lambda:update_ui(clicked=0))
+        make_vertical_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        show_hide_original_button = tk.Button(UI_button_frame, text="Hide original video", bg=button_color, fg=text_color, command=lambda:update_ui(clicked=1))
+        show_hide_original_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        show_hide_swapped_button = tk.Button(UI_button_frame, text="Hide swapped video", bg=button_color, fg=text_color, command=lambda:update_ui(clicked=2))
+        show_hide_swapped_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+
+        original_image_label = tk.Label(right_frame1, bg=background_color)#, text="Original frame placeholder")
+        swapped_image_label = tk.Label(right_frame2, bg=background_color)#, text="Swapped frame placeholder")
         right_frame1.grid_propagate(False)
         right_frame2.grid_propagate(False)
         if mode == 1:
@@ -731,10 +987,10 @@ while True:
         else:
             # Stacked configuration
             right_frame1.grid(row=0, column=1, columnspan=2, sticky="nsew")
-            original_image_label.grid(sticky="nsew", padx=15, pady=15)
+            original_image_label.grid(sticky="nsew", padx=15, pady=10)
 
             right_frame2.grid(row=1, column=1, columnspan=2, sticky="nsew")
-            swapped_image_label.grid(sticky="nsew", padx=15, pady=15)
+            swapped_image_label.grid(sticky="nsew", padx=15, pady=10)
             
             # Configure column and row weights
             root.grid_columnconfigure(0, weight=1)
@@ -762,10 +1018,10 @@ while True:
                 real_y = width*relative_x
                 for bbox in bboxes:
                     if real_y > bbox[0] and real_y < bbox[2] and real_x > bbox[1] and real_x < bbox[3]:
-                        videos[current_video]['old_number'] = -1
                         this_face = videos[current_video]['original_image'][int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
                         args['selective'] = True
                         target_embedding = get_embedding(this_face)[0]
+                        videos[current_video]['old_number'] = -1
                         cv2.imshow("cropped face", this_face)
                         cv2.waitKey(0)
                         try:
@@ -795,9 +1051,15 @@ while True:
                 frame_move = 1
             else:
                 frame_move = 0
+        def update_wraplength(event):
+            select_face_label.config(wraplength=left_frame.winfo_width() - 20)  # Subtract a small padding
+            select_target_label.config(wraplength=left_frame.winfo_width() - 20)  # Subtract a small padding
+            select_output_label.config(wraplength=left_frame.winfo_width() - 20)  # Subtract a small padding
+
         root.bind("<Left>", left_arrow_click)
         root.bind("<Right>", right_arrow_click)
         root.bind("<space>", space_click)
+        root.bind("<Configure>", update_wraplength)
         right_control_frame = tk.Frame(root, bg=background_color)
         right_control_frame.grid(row=0, column=0, rowspan=2, sticky="ns")
         def add():
@@ -827,10 +1089,12 @@ while True:
         select_output_label.grid(row=7, column=0, pady=3)
         canvas3 = tk.Canvas(right_control_frame, height=2, bg=border_color, highlightthickness=0)
         canvas3.grid(row=8, column=0, columnspan=2, sticky='ew', padx=0, pady=4)
-        button_select_camera = tk.Button(right_control_frame, text='run from camera',bg=button_color, fg=text_color, command=select_camera)
-        button_select_camera.grid(row=9, column=0, pady=3, sticky='ew')
-        button_start_program = tk.Button(right_control_frame, text="Add this video",bg=button_color, fg=text_color, command=add)
-        button_start_program.grid(row=10, column=0, pady=3, sticky='ew')
+        start_video_frame = tk.Frame(right_control_frame, bg=background_color)
+        start_video_frame.grid(row=9, column=0, sticky="ew")
+        button_start_program = tk.Button(start_video_frame, text="Add this video",bg=button_color, fg=text_color, command=add)
+        button_start_program.pack(side=tk.LEFT, fill=tk.X, expand=True)#.grid(row=10, column=0, pady=3, sticky='ew')
+        button_select_camera = tk.Button(start_video_frame, text='run from camera',bg=button_color, fg=text_color, command=select_camera)
+        button_select_camera.pack(side=tk.LEFT, fill=tk.X, expand=True)#.grid(row=9, column=0, pady=3, sticky='ew')
         #thread_amount_label = tk.Label(right_control_frame, text='Select the number of threads', fg=text_color, bg=background_color)
         #thread_amount_label.grid(row=8, column=0)
         #thread_amount_input = tk.Entry(right_control_frame)
@@ -875,12 +1139,13 @@ while True:
             except:
                 return
     def face_analyser_thread(frame, sw):
-        global alpha, codeformer
-        original_frame = frame
+        global alpha2, codeformer
+        original_frame = frame.copy()
         if not args['cli']:
             test1 = alpha != 0
         else:
             test1 = args['alpha'] != 0
+        _upscaled = False
         if test1:        
             faces = face_analysers[sw].get(frame)
             bboxes = []
@@ -901,7 +1166,11 @@ while True:
                     if not args['cli']:
                         occluder_works = int(occluder_checkbox_var.get())
                         #print(occluder_works)
-                    frame = face_swappers[sw].get(frame, face, get_source_face(),occluder_works, paste_back=True)
+                    clip_works = False
+                    if not args['cli']:
+                        clip_works = int(enable_clip_var.get())
+                    frame = face_swappers[sw].get(frame, face, get_source_face(),occluder_works, clip_works, [clip_pos_prompt, clip_neg_prompt], paste_back=True)
+                    swapped_frame = frame.copy()
                 try:
                     test1 = checkbox_var.get() == 1 
                     test2 = not enhancer_choice.get() == "codeformer"
@@ -914,8 +1183,8 @@ while True:
                         x1, y1, x2, y2 = int(i[0]),int(i[1]),int(i[2]),int(i[3])
                         x1 = max(x1-adjust_x1, 0)
                         y1 = max(y1-adjust_y1, 0)
-                        x2 = min(x2+adjust_x2, int(width))
-                        y2 = min(y2+adjust_y2, int(height))
+                        x2 = min(x2+adjust_x2, videos[current_loop_video]['width'])
+                        y2 = min(y2+adjust_y2, videos[current_loop_video]['height'])
                         facer = frame[y1:y2, x1:x2]
                         if not args['cli']:
                             enhancer_choice_value = enhancer_choice.get()
@@ -931,6 +1200,7 @@ while True:
                             facex = realesrgan_enhance(facer)
                         facex = cv2.resize(facex, ((x2-x1), (y2-y1)))
                         frame[y1:y2, x1:x2] = facex
+                        _upscaled = True
                     except Exception as e:
                         print(f"ee: {e}")
             if not args['cli']:
@@ -946,6 +1216,14 @@ while True:
                         from plugins.codeformer_app_cv2 import inference_app as codeformer
                     frame = codeformer(frame, args['codeformer_background_enhance'], args['codeformer_face_upscale'], args['codeformer_upscale'], float(args['codeformer_fidelity']), args['codeformer_skip_if_no_face'])
             if not args['cli']:
+                test1 = alpha2 != 1
+            else:
+                test1 = args['alpha'] != 1
+            if test1:
+                #print(alpha)
+                if _upscaled:
+                    frame = merge_face(frame, swapped_frame, alpha2)
+            if not args['cli']:
                 test1 = alpha != 1
             else:
                 test1 = args['alpha'] != 1
@@ -955,13 +1233,13 @@ while True:
             return bboxes, frame, original_frame
         return [], frame, original_frame
 
-    def cv2_image_to_tkinter(cv2_image, target_width, target_height):
+    def cv2_image_to_tkinter(cv2_image, target_width, target_height, pad_width=30, pad_height=50):
         """Convert a cv2 image to a tkinter compatible format and resize it to fit target dimensions."""
         cv2_img_rgb = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(cv2_img_rgb)
 
-        target_width -= 30
-        target_height -= 30
+        target_width -= pad_width
+        target_height -= pad_height
         
         # Resize the image while maintaining its aspect ratio
         image_aspect = pil_image.width / pil_image.height
@@ -984,19 +1262,47 @@ while True:
             if not isinstance(videos[current_video]['original_image'], NoneType) and not isinstance(videos[current_video]['swapped_image'], NoneType):
                     sizex1, sizey1 = right_frame1.winfo_width(), right_frame1.winfo_height()
                     sizex2, sizey2 = right_frame2.winfo_width(), right_frame2.winfo_height()
-                    tk_image = cv2_image_to_tkinter(videos[current_video]['original_image'], sizex1, sizey1)
-                    original_image_label.configure(image=tk_image)
-                    original_image_label.image = tk_image  # Keep a reference to prevent garbage collection
+                    tk_imagex = cv2_image_to_tkinter(videos[current_video]['original_image'], sizex1, sizey1)
+                    original_image_label.configure(image=tk_imagex)
+                    original_image_label.image = tk_imagex  # Keep a reference to prevent garbage collection
                     tk_image = cv2_image_to_tkinter(videos[current_video]['swapped_image'], sizex2, sizey2)
                     swapped_image_label.configure(image=tk_image)
                     swapped_image_label.image = tk_image
+                    if original_image_second_open:
+                        sizex1, sizey1 = original_image_label_second.winfo_width(), original_image_label_second.winfo_height()
+                        tk_imagex = cv2_image_to_tkinter(videos[current_video]['original_image'], sizex1, sizey1,0,0)
+                        original_image_label_second.configure(image=tk_imagex)
+                        original_image_label_second.image = tk_imagex  # Keep a reference to prevent garbage collection
+                    if swapped_image_second_open:
+                        sizex2, sizey2 = swapped_image_second_window.winfo_width(), swapped_image_second_window.winfo_height()
+                        tk_image = cv2_image_to_tkinter(videos[current_video]['swapped_image'], sizex2, sizey2, 0,0)
+                        swapped_image_label_second.configure(image=tk_image)
+                        swapped_image_label_second.image = tk_image  # Keep a reference to prevent garbage collection
+                        
             else:
                     original_image_label.configure(image=None)
                     original_image_label.image = None  # Keep a reference to prevent garbage collection
                     swapped_image_label.configure(image=None)
                     swapped_image_label.image = None
+                    if original_image_second_open:
+                        original_image_label_second.configure(image=None)
+                        original_image_label_second.image = None  # Keep a reference to prevent garbage collection
+                    if swapped_image_second_open:
+                        swapped_image_label_second.configure(image=None)
+                        swapped_image_label_second.image = None  # Keep a reference to prevent garbage collection
 
         except:
+            
+            original_image_label.configure(image=None)
+            original_image_label.image = None  # Keep a reference to prevent garbage collection
+            swapped_image_label.configure(image=None)
+            swapped_image_label.image = None
+            if original_image_second_open:
+                original_image_label_second.configure(image=None)
+                original_image_label_second.image = None  # Keep a reference to prevent garbage collection
+            if swapped_image_second_open:
+                swapped_image_label_second.configure(image=None)
+                swapped_image_label_second.image = None  # Keep a reference to prevent garbage collection
             pass
         if xx:
             root.after(30, frame_updater)
@@ -1096,7 +1402,7 @@ while True:
         button_start_program.grid(row=10, column=0, pady=3, sticky='ew')
 
     def main():
-        global current_video, videos,old_index, args, width, height, frame_index, face_analysers,frame_move, face_swappers, source_face, progress_var, target_embedding, count, frame_number, listik, frame, cap
+        global current_video, videos,old_index, args, width, height, frame_index, face_analysers,frame_move, face_swappers, source_face, progress_var, target_embedding, count, frame_number, listik, frame, cap,current_loop_video
         #start = time.time()
         if not args['fastload']:
             face_swappers, face_analysers = prepare_swappers_and_analysers(args)
@@ -1216,20 +1522,32 @@ while True:
                                 bbox, videos[current_loop_video]["swapped_image"], videos[current_loop_video]['original_image'] = videos[current_loop_video]['temp'].pop(0).join()
                             xxs = True
                         else:
-                            if not videos[current_loop_video]['current_frame_index'] == videos[current_loop_video]['old_number']:
+                            
+                            if not videos[current_loop_video]['current_frame_index'] == videos[current_loop_video]['old_number'] or int(realtime_updater_var.get()):
+                                #if not videos[current_loop_video]['rendering']:
+                                if not isinstance(videos[current_loop_video]['target_path'], int):
+                                    videos[current_loop_video]['old_number'] = videos[current_loop_video]['current_frame_index']
+                                    videos[current_loop_video]['current_frame_index'] += frame_move
+                                    if videos[current_loop_video]['current_frame_index'] < 1:
+                                        videos[current_loop_video]['current_frame_index'] = 1
+                                    elif videos[current_loop_video]['current_frame_index'] > videos[current_loop_video]["frame_number"]:
+                                        videos[current_loop_video]['current_frame_index'] = videos[current_loop_video]["frame_number"]
+                                else:videos[current_loop_video]['current_frame_index'] = 0
                                 bbox, videos[current_loop_video]["swapped_image"], videos[current_loop_video]['original_image'] = face_analyser_thread(get_nth_frame(videos[current_loop_video]["cap"], videos[current_loop_video]['current_frame_index']-1), count%len(face_swappers))
                             xxs = False
                         if not args['cli']:
-                            if show_bbox_var.get() == 1:
+                            if show_bbox_var.get() == 1 or face_selector_var.get() == 1:
                                 for i in bbox: 
                                     x1, y1, x2, y2 = int(i[0]),int(i[1]),int(i[2]),int(i[3])
                                     x1 = max(x1-adjust_x1, 0)
                                     y1 = max(y1-adjust_y1, 0)
-                                    x2 = min(x2+adjust_x2, width)
-                                    y2 = min(y2+adjust_y2, height)
+                                    x2 = min(x2+adjust_x2, videos[current_loop_video]['width'])
+                                    y2 = min(y2+adjust_y2, videos[current_loop_video]['height'])
                                     color = (0, 255, 0)  # Green color (BGR format)
                                     thickness = 2  # Line thickness
-                                    cv2.rectangle(videos[current_loop_video]["swapped_image"], (x1,y1), (x2,y2), color, thickness)
+                                    if show_bbox_var.get() == 1:
+                                        cv2.rectangle(videos[current_loop_video]["swapped_image"], (x1,y1), (x2,y2), color, thickness)
+                                    cv2.rectangle(videos[current_loop_video]["original_image"], (x1,y1), (x2,y2), color, thickness)
                         if time.time() - start > 1:
                             start = time.time()
                             if not args['nocuda'] and not args['apple']:
@@ -1244,23 +1562,14 @@ while True:
                             #videos[current_video]['swapped_image'] = videos[current_video]["swapped_image"]
                             #cv2.imshow('Face Detection', frame)
                         
-                        if not args['cli']:
-                            if show_external_swapped_preview_var.get() == 1:
-                                cv2.imshow('swapped frame', videos[current_loop_video]["swapped_image"])
+                        #if not args['cli']:
+                        #    if show_external_swapped_preview_var.get() == 1:
+                        #        cv2.imshow('swapped frame', videos[current_loop_video]["swapped_image"])
                         if videos[current_loop_video]['rendering'] and ((videos[current_loop_video]['rendering'] and not args['cli']) or args['cli']) and xxs:
                             videos[current_loop_video]['out'].write(videos[current_loop_video]["swapped_image"])
                         
                         if args['vcam']:
                             cam.send(cv2.cvtColor(videos[current_loop_video]["swapped_image"], cv2.COLOR_RGB2BGR))
-                        if not videos[current_loop_video]['rendering']:
-                            if not isinstance(videos[current_loop_video]['target_path'], int):
-                                videos[current_loop_video]['old_number'] = videos[current_loop_video]['current_frame_index']
-                                videos[current_loop_video]['current_frame_index'] += frame_move
-                                if videos[current_loop_video]['current_frame_index'] < 1:
-                                    videos[current_loop_video]['current_frame_index'] = 1
-                                elif videos[current_loop_video]['current_frame_index'] > videos[current_loop_video]["frame_number"]:
-                                    videos[current_loop_video]['current_frame_index'] = videos[current_loop_video]["frame_number"]
-                            else:videos[current_loop_video]['current_frame_index'] = 0
 
                             
                         if args['extract_output'] != '':
@@ -1285,13 +1594,13 @@ while True:
                 for i in videos[current_video]['temp']:
                     bbox, videos[current_video]["swapped_image"], videos[current_video]['original_image'] = i.join()
                     if not args['cli']:
-                        if show_bbox_var.get() == 1:
+                        if show_bbox_var.get() == 1 :
                             for i in bbox: 
                                 x1, y1, x2, y2 = int(i[0]),int(i[1]),int(i[2]),int(i[3])
                                 x1 = max(x1-adjust_x1, 0)
                                 y1 = max(y1-adjust_y1, 0)
-                                x2 = min(x2+adjust_x2, width)
-                                y2 = min(y2+adjust_y2, height)
+                                x2 = min(x2+adjust_x2, videos[current_loop_video]['width'])
+                                y2 = min(y2+adjust_y2, videos[current_loop_video]['height'])
                                 color = (0, 255, 0)  # Green color (BGR format)
                                 thickness = 2  # Line thickness
                                 cv2.rectangle(videos[current_video]["swapped_image"], (x1,y1), (x2,y2), color, thickness)
@@ -1308,9 +1617,9 @@ while True:
                     if args['extract_output'] != '':
                         cv2.imwrite(os.path.join(args['extract_output'], os.path.basename(videos[current_video]["target_path"]), f"frame_{videos[current_video]['count']:05d}.png"), videos[current_video]["swapped_image"])
                     progressbar.update(1)
-                    if not args['cli']:
-                        if show_external_swapped_preview_var.get() == 1:
-                            cv2.imshow('swapped frame', videos[current_video]["swapped_image"])
+                    #if not args['cli']:
+                    #    if show_external_swapped_preview_var.get() == 1:
+                    #        cv2.imshow('swapped frame', videos[current_video]["swapped_image"])
                     if not videos[current_video]['rendering']:
                         old_number = videos[current_video]['current_frame_index']
                         while videos[current_video]['current_frame_index'] == old_number:
@@ -1425,6 +1734,8 @@ while True:
             update_selector()
             frame_updater()
             root.after(1000, toggle_menu)
+            root.after(1000, toggle_clip_menu)
+            
             root.mainloop()
         else:
             main()
