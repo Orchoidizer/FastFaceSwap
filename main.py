@@ -29,7 +29,8 @@ parser.add_argument('--batch', help='batch processing mode, after the argument w
 #parser.add_argument('--extract-target-frames', help='extract frames from target video. After argument write the path to folder', dest='extract_target', default="")
 parser.add_argument('--extract-output-frames', help='extract frames from output video. After argument write the path to folder', dest='extract_output', default="")
 parser.add_argument('--codeformer-fidelity', help='sets up codeformer\'s fidelity if used with cli mode',default=0.1, dest='codeformer_fidelity')
-parser.add_argument('--blend', help='works with cli, blending amount from 0.0 to 1.0', default=1.0, dest='alpha')
+parser.add_argument('--blend', help='works with cli, original/final blending amount from 0.0 to 1.0', default=1.0, dest='alpha')
+parser.add_argument('--blend2', help='works with cli, swapped/upscaled blending amount from 0.0 to 1.0', default=1.0, dest='alpha2')
 parser.add_argument('--codeformer-skip_if_no_face', help='works only in cli. Skip codeformer if no face found', dest='codeformer_skip_if_no_face', action='store_true')
 parser.add_argument('--codeformer-face-upscale', help='works only in cli. Upscale the face using codeformer', dest='codeformer_face_upscale', action='store_true')
 parser.add_argument('--codeformer-background-enhance', help='works only in cli. Enhance the background using codeformer', dest='codeformer_background_enhance', action='store_true')
@@ -40,13 +41,16 @@ parser.add_argument('--fast-load', help='try to load as fast as possible, may be
 parser.add_argument("--bbox-adjust", help='adjustements to do for the box: x1,y1 coords of left top corner and x2,y2 are bottom right. Give in the form x1xy1xx2xy2 (default: 50x50x50x50)', default='50x50x50x50',dest='bbox_adjust')
 parser.add_argument("-vcam", "--virtual-camera", help='allows to use OBS virtual camera as output source', action='store_true', dest="vcam")
 parser.add_argument("--apple", help='just in case you are an apple user, you can finally use FFS', action='store_true', dest="apple")
+parser.add_argument("--occluder", help='use occluder with cli', action='store_true', dest="occluder")
+parser.add_argument("--remove-background", "--rembg", help='remove background', action='store_true', dest="rembg")
+parser.add_argument("--advanced-search", help='advanced search for faces, some functions might not work properly and faces might break', action='store_true', dest="advanced_search")
 args = {}
 for name, value in vars(parser.parse_args()).items():
     args[name] = value
 width, height = args['resolution'].split('x')
 globalsz.width, globalsz.height = int(width), int(height)
-if args['batch'] != "" and not args['batch'].endswith(".mp4"):
-    args['batch'] += '.mp4'
+#if args['batch'] != "" and not args['batch'].endswith(".mp4"):
+#    args['batch'] += '.mp4'
 #if args['extract_target'] != '':
 #    os.makedirs(args['extract_target'])
 if args['extract_output'] != '':
@@ -58,6 +62,7 @@ if args['vcam']:
         print("pip install pyvirtualcam to support output to OBS virtual camera")
         exit()
 alpha = float(args['alpha'])
+alpha2 = float(args['alpha2'])
 frame = None #so tkinter doesn't die 
 #if args['cli']:
     #testx = input("Are you sure you want to extract frames from videos? It will be done in the background (yes for yes and anything else for no):")
@@ -468,6 +473,10 @@ while True:
         realtime_updater = ttk.Checkbutton(left_frame, text="realtime updater", variable=realtime_updater_var, style="TCheckbutton")
         realtime_updater.grid(row=row_counter, column=0)
         row_counter += 1
+        bg_remover_var = tk.IntVar()
+        bg_remover_box = ttk.Checkbutton(left_frame, text="remove background", variable=bg_remover_var, style="TCheckbutton")
+        bg_remover_box.grid(row=row_counter, column=0)
+        row_counter += 1
         if not isinstance(args['target_path'], int):
             progress_label = tk.Label(left_frame, fg=text_color, bg=background_color)
             progress_label.grid(row=row_counter, column=0)
@@ -543,7 +552,8 @@ while True:
             videos[current_video]['count'] = -1
             render_button.config(state=tk.DISABLED)
             stop_rendering_button.config(state=tk.ACTIVE)
-            videos[current_video]['cap'].set(cv2.CAP_PROP_POS_FRAMES, 0)
+            if videos[current_video]['type'] == 1:
+                videos[current_video]['cap'].set(cv2.CAP_PROP_POS_FRAMES, 0)
         def not_run_it_please():
             global count, videos, current_video
             videos[current_video]['rendering'] = False
@@ -551,9 +561,10 @@ while True:
             videos[current_video]['count'] = -1
             render_button.config(state=tk.ACTIVE)
             stop_rendering_button.config(state=tk.DISABLED)
-            videos[current_video]['cap'].set(cv2.CAP_PROP_POS_FRAMES, 0)
-            videos[current_video]['out'].release()
-            videos[current_video]['out'] = cv2.VideoWriter(videos[current_video]['out_settings_for_resetting']['name_temp'], videos[current_video]['out_settings_for_resetting']['fourcc'], 
+            if videos[current_video]['type'] == 1:
+                videos[current_video]['cap'].set(cv2.CAP_PROP_POS_FRAMES, 0)
+                videos[current_video]['out'].release()
+                videos[current_video]['out'] = cv2.VideoWriter(videos[current_video]['out_settings_for_resetting']['name_temp'], videos[current_video]['out_settings_for_resetting']['fourcc'], 
                                                            videos[current_video]['out_settings_for_resetting']['fps'], (videos[current_video]['out_settings_for_resetting']['width'], videos[current_video]['out_settings_for_resetting']['height']))
 
         
@@ -835,7 +846,7 @@ while True:
             face_chooser_window.withdraw()
        
         face_chooser_window = tk.Toplevel(root, bg=background_color)
-        face_chooser_window.attributes("-topmost", True)
+        #face_chooser_window.attributes("-topmost", True)
         face_chooser_window.geometry("640x560")
         face_chooser_window.grid_rowconfigure(0, weight=1)
         face_chooser_window.grid_columnconfigure(0, weight=1)
@@ -986,8 +997,8 @@ while True:
                 root.grid_rowconfigure(1, weight=show_swapped)
             right_frame1.grid_propagate(False)
             right_frame2.grid_propagate(False)
-            root.update_idletasks()
-            root.update()
+            #root.update_idletasks()
+            #root.update()
         
         UI_button_frame = tk.Frame(left_frame, bg=background_color)
         UI_button_frame.grid(row=row_counter, column=0, sticky="ew")
@@ -1099,8 +1110,11 @@ while True:
         right_control_frame.grid(row=0, column=0, rowspan=2, sticky="ns")
         def add():
             global videos
-            facex = sorted(face_analysers[0].get(cv2.imread(args["face"])), key=lambda x: x.bbox[0])[0]
-            videos.append(create_new_cap(args['target_path'], facex, args['output'],))
+            try:
+                facex = sorted(face_analysers[0].get(cv2.imread(args["face"])), key=lambda x: x.bbox[0])[0]
+                videos.append(create_new_cap(args['target_path'], facex, args['output'],))
+            except Exception as e:
+                show_error_custom(text=f"Wait few seconds and try again, program didn't start yet (I will not notify you). debug error: {e}")
         def delete_current_video():
             global videos, current_video
             videos.pop(current_video)
@@ -1182,11 +1196,9 @@ while True:
             test1 = args['alpha'] != 0
         _upscaled = False
         if test1:
-            advanced_search = False
+            advanced_search = args['advanced_search']
             if not args['cli']:
                 advanced_search = advanced_face_detector_var.get()
-            else:
-                pass
             
             if not advanced_search:
                 faces = face_analysers[sw].get(frame)
@@ -1216,7 +1228,7 @@ while True:
                         if faceswapper_checkbox_var.get() == True:
                             ttest1=True
                     if not args['no_faceswap'] and (ttest1 == True or args['cli']):
-                        occluder_works= False
+                        occluder_works = args['occluder']
                         if not args['cli']:
                             occluder_works = int(occluder_checkbox_var.get())
                             #print(occluder_works)
@@ -1267,7 +1279,10 @@ while True:
                             print(f"ee: {e}")
             else:
                 init_advanced_face_detector() #will not do anything if loaded
-                rotation_angles = calculate_rotation_angles(frame)
+                bboxes, rotation_angles = get_face_details(frame, 50)
+                extracted_faces = []
+                #for bbox in bboxes:
+                #    fa =  
                 for it in range(len(rotation_angles)):
                     #a = frame[bbox[1]:bbox[3], bbox[0]:bbox[2]]
                     #cv2.imshow('a', a)
@@ -1356,7 +1371,7 @@ while True:
             if not args['cli']:
                 test1 = alpha2 != 1
             else:
-                test1 = args['alpha'] != 1
+                test1 = args['alpha2'] != 1
             if test1:
                 #print(alpha)
                 if _upscaled:
@@ -1368,6 +1383,12 @@ while True:
             if test1:
                 #print(alpha)
                 frame = merge_face(frame, original_frame, alpha)
+            rem_bg = args['rembg']
+            if not args['cli']:
+                rem_bg = int(bg_remover_var.get())
+            if rem_bg:
+                #print("rembg")
+                frame = remove_background(frame,args, ct=sw, magic = True)
             return [], frame, original_frame
         return [], frame, original_frame
 
@@ -1429,7 +1450,7 @@ while True:
                         swapped_image_label_second.configure(image=None)
                         swapped_image_label_second.image = None  # Keep a reference to prevent garbage collection
 
-        except:
+        except Exception as e:
             
             original_image_label.configure(image=None)
             original_image_label.image = None  # Keep a reference to prevent garbage collection
@@ -1441,6 +1462,7 @@ while True:
             if swapped_image_second_open:
                 swapped_image_label_second.configure(image=None)
                 swapped_image_label_second.image = None  # Keep a reference to prevent garbage collection
+            #print(e)
             pass
         if xx:
             root.after(30, frame_updater)
@@ -1552,12 +1574,7 @@ while True:
         #    source_face = sorted(face_analysers[0].get(input_face), key=lambda x: x.bbox[0])[0]
         gpu_usage = 0
         vram_usage = 0
-        if args['selective'] != '':
-            if args['selective'] != True:
-                im = cv2.imread(args['selective'])
-                #im = cv2.resize(im, (640, 640))
-                target_embedding = get_embedding(im)[0]
-        if args['image'] == True :
+        '''        if args['image'] == True :
             images = []
             if args['batch'] != "":
                 for i in os.listdir(args['target_path']):
@@ -1579,7 +1596,7 @@ while True:
             while threading.active_count() > original_threads:
                 time.sleep(0.01)
             print("image processing finished")
-            exit()
+            exit()'''
         caps = []
         #if args['batch'] == '':
         #    videos.append(create_new_cap(args['target_path']))
@@ -1596,7 +1613,18 @@ while True:
         elif args['fastload'] and not args['cli']:
             for t in tx:
                 t.join()
-
+        if args['selective'] != '':
+            if args['selective'] != True:
+                im = cv2.imread(args['selective'])
+                #im = cv2.resize(im, (640, 640))
+                target_embedding = get_embedding(im)[0]
+        if args['cli']:
+            facex = sorted(face_analysers[0].get(cv2.imread(args["face"])), key=lambda x: x.bbox[0])[0]
+            if args['batch'] == '':
+                videos.append(create_new_cap(args['target_path'], facex, args['output'],batch_post=""))
+            else:
+                for file in os.listdir(args['target_path']):
+                    videos.append(create_new_cap(os.path.join(args['target_path'], file), facex, os.path.join(args['output'], file),batch_post=args['batch']))
         #videos[current_video]['rendering'] = int(args['cli'])
         #if not args['cli'] and not args['preview']:
         #    open_second_window()
@@ -1608,8 +1636,7 @@ while True:
             #update_progress_bar( 10, 0, frame_number)
             count = -1
             #videos[current_video]['current_frame_index'] = count
-            if args['vcam'] and videos[current_video]["type"] == 1:
-                cam = pyvirtualcam.Camera(width=width, height=height, fps=videos[current_video]["fps"])
+            print(videos[current_video]["frame_number"])
             progressbar = tqdm(total=videos[current_video]["frame_number"])
             bbox = []
             start = time.time()
@@ -1627,11 +1654,21 @@ while True:
                     temp[-1].start()
                     count += 1'''
             xxs = True
-            
+            current_loop_video = -1
+            cam = None
             try:
                 while True:
                     try:
                         #print(videos[current_video]['rendering'])
+                        if current_loop_video != current_video:
+                            if args['vcam'] and videos[current_video]["type"] == 1:
+                                try:
+                                    cam.close()
+                                except Exception as e:
+                                    #print(e)
+                                    pass
+                                del cam
+                                cam = pyvirtualcam.Camera(width=int(videos[current_video]['width']), height=int(videos[current_video]['height']), fps=float(videos[current_video]["fps"]))
                         current_loop_video = current_video
                         if videos[current_loop_video]['rendering'] and ((videos[current_loop_video]['rendering'] and not args['cli']) or args['cli']):
                             
@@ -1646,7 +1683,7 @@ while True:
                                 if isinstance(frame, NoneType): #== None:
                                     break
                             else:
-                                ret, frame = videos[current_loop_video]["cap"].read()
+                                ret, frame = get_frame(videos[current_loop_video], -1, True)#videos[current_loop_video]["cap"].read()
                                 if not ret:
                                     break
                             #print("red cap")
@@ -1654,6 +1691,8 @@ while True:
                                 torch.cuda.empty_cache()
                             videos[current_loop_video]['temp'].append(ThreadWithReturnValue(target=face_analyser_thread, args=(frame,videos[current_loop_video]['count']%len(face_swappers))))
                             videos[current_loop_video]['temp'][-1].start()
+                            if videos[current_loop_video]['type'] == 0:
+                                break
                             if len(videos[current_loop_video]['temp']) < int(args['threads']) * len(face_swappers) and ret:
                                 continue
                             while len(videos[current_loop_video]['temp']) >= int(args['threads']) * len(face_swappers):
@@ -1670,8 +1709,8 @@ while True:
                                         videos[current_loop_video]['current_frame_index'] = 1
                                     elif videos[current_loop_video]['current_frame_index'] > videos[current_loop_video]["frame_number"]:
                                         videos[current_loop_video]['current_frame_index'] = videos[current_loop_video]["frame_number"]
-                                else:videos[current_loop_video]['current_frame_index'] = 0
-                                bbox, videos[current_loop_video]["swapped_image"], videos[current_loop_video]['original_image'] = face_analyser_thread(get_nth_frame(videos[current_loop_video]["cap"], videos[current_loop_video]['current_frame_index']-1), count%len(face_swappers))
+                                else:videos[current_loop_video]['current_frame_index'] = 0 
+                                bbox, videos[current_loop_video]["swapped_image"], videos[current_loop_video]['original_image'] = face_analyser_thread(get_frame(videos[current_loop_video], videos[current_loop_video]['current_frame_index']-1), count%len(face_swappers))
                             xxs = False
                         if not args['cli']:
                             if show_bbox_var.get() == 1 or face_selector_var.get() == 1:
@@ -1693,6 +1732,7 @@ while True:
                                 progressbar.set_description(f"VRAM: {vram_usage}/{gpu_memory_total} GB, usage: {gpu_usage}%")
                         
                         if not args['cli']:
+                            frame_updater(xx=False)
                             if not args['nocuda'] and not args['apple']:
                                 listik = [videos[current_loop_video]['count'], videos[current_loop_video]["frame_number"],gpu_usage, vram_usage,gpu_memory_total]
                             else:
@@ -1704,11 +1744,10 @@ while True:
                         #    if show_external_swapped_preview_var.get() == 1:
                         #        cv2.imshow('swapped frame', videos[current_loop_video]["swapped_image"])
                         if videos[current_loop_video]['rendering'] and ((videos[current_loop_video]['rendering'] and not args['cli']) or args['cli']) and xxs:
-                            videos[current_loop_video]['out'].write(videos[current_loop_video]["swapped_image"])
-                        
+                            #videos[current_loop_video]['out'].write(videos[current_loop_video]["swapped_image"])
+                            write_frame(videos[current_loop_video])
                         if args['vcam']:
                             cam.send(cv2.cvtColor(videos[current_loop_video]["swapped_image"], cv2.COLOR_RGB2BGR))
-
                             
                         if args['extract_output'] != '':
                             cv2.imwrite(os.path.join(args['extract_output'], os.path.basename(videos[current_loop_video]["target_path"]), f"frame_{videos[current_loop_video]['count']:05d}.png"), videos[current_loop_video]["swapped_image"])
@@ -1749,7 +1788,8 @@ while True:
                             progressbar.set_description(f"VRAM: {vram_usage}/{gpu_memory_total} GB, usage: {gpu_usage}%")
                     
                     if videos[current_video]['rendering'] and ((videos[current_video]['rendering'] and not args['cli']) or args['cli']):
-                        videos[current_video]['out'].write(videos[current_video]["swapped_image"])
+                        write_frame(videos[current_video])
+                        #videos[current_video]['out'].write(videos[current_video]["swapped_image"])
                     if args['vcam']:
                         cam.send(cv2.cvtColor(videos[current_video]["swapped_image"], cv2.COLOR_RGB2BGR))
                     if args['extract_output'] != '':
@@ -1762,29 +1802,38 @@ while True:
                         old_number = videos[current_video]['current_frame_index']
                         while videos[current_video]['current_frame_index'] == old_number:
                             time.sleep(0.01)
-                        
+                    if not args['cli']:
+                        frame_updater(xx=False)
                     if cv2.waitKey(1) & 0xFF == ord('q'):
                         break
-                videos[current_video]['out'].release()
-                #videos[current_video]["cap"].release()
-                cv2.destroyAllWindows()
+                #cv2.destroyAllWindows()
                 progressbar.close()
-                if args['batch'] != '':
-                    try:
-                        add_audio_from_video(videos[current_video]["save_temp_path"],videos[current_video]["target_path"], videos[current_video]['save_path'])
-                        os.remove(videos[current_video]["save_temp_path"])
-                    except Exception as e:
-                        print(f"SOMETHING WENT WRONG DURING THE ADDING OF THE AUDIO TO THE VIDEO!file: {videos[current_video]['save_path']}, error:{e}")
-                else:
-                    if not isinstance(args['target_path'], int):
+                if videos[current_video]['type'] == 1:
+                    videos[current_video]['out'].release()
+                #videos[current_video]["cap"].release()
+                
+                    if args['batch'] != '':
                         try:
-                            add_audio_from_video(videos[current_video]["save_temp_path"], videos[current_video]["target_path"], videos[current_video]['save_path'])
+                            add_audio_from_video(str(videos[current_video]["save_temp_path"]).replace("\\", "/"),str(videos[current_video]["target_path"]).replace("\\", "/"), str(videos[current_video]['save_path']).replace("\\", "/"))
+                            print('deleting')
                             os.remove(videos[current_video]["save_temp_path"])
                         except Exception as e:
-                            print(f"failed to add audio: {e}")
-                videos[current_video]["cap"] = reset_cap(videos[current_video]["cap"])
+                            print(f"SOMETHING WENT WRONG DURING THE ADDING OF THE AUDIO TO THE VIDEO!file: {videos[current_video]['save_path']}, error:{e}")
+                    else:
+                        if not isinstance(args['target_path'], int):
+                            try:
+                                add_audio_from_video(str(videos[current_video]["save_temp_path"]).replace("\\", "/"), str(videos[current_video]["target_path"]).replace("\\", "/"), str(videos[current_video]['save_path']).replace("\\", "/"))
+                                
+                                os.remove(videos[current_video]["save_temp_path"])
+                            except Exception as e:
+                                print(f"failed to add audio: {e}")
+                    videos[current_video]["cap"] = reset_cap(videos[current_video]["cap"])
                 if not args['cli']:
                     not_run_it_please()
+                if args['cli']:
+                    current_video += 1
+                    if current_video == len(videos):
+                        on_closing()
                 continue
         
             except KeyboardInterrupt:
@@ -1877,16 +1926,16 @@ while True:
                 root.after(30, update_selector, new_len)
             update_gui()
             update_selector()
-            frame_updater()
+            #frame_updater()
             root.after(1000, toggle_menu)
             root.after(1000, toggle_clip_menu)
             
             root.mainloop()
         else:
             main()
-    except Exception as e:
-        print(e)
-        os._exit(1)
+    #except Exception as e:
+    #    print(e)
+    #    os._exit(1)
     finally:
         if not args['cli']:
             globalsz.source_face = None

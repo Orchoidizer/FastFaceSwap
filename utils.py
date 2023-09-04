@@ -44,8 +44,10 @@ import sys
 #if not globalsz.args['nocuda']:
 #    torch.backends.cudnn.benchmark = True
 import tqdm
-import mediapipe as mp
+import magic    #pip install python-magic-bin https://github.com/Yelp/elastalert/issues/1927
+mime = magic.Magic(mime=True)
 if not globalsz.args['fastload']:
+    import mediapipe as mp
     from basicsr.archs.rrdbnet_arch import RRDBNet
     from basicsr.utils.download_util import load_file_from_url
     from realesrgan import RealESRGANer
@@ -56,6 +58,8 @@ if not globalsz.args['fastload']:
     from scipy.spatial import distance
     import queue
     import torch
+    from rembg import remove as remove_bg
+    from rembg import new_session
 if not globalsz.lowmem:
     import tensorflow as tf
     physical_devices = tf.config.list_physical_devices('GPU')
@@ -209,6 +213,9 @@ def get_face_bboxes(image, adjustment_pixels):
 
     return adjusted_bboxes
 def init_advanced_face_detector():
+    global mp
+    if globalsz.args['fastload']:
+        import mediapipe as mp
     if isinstance(globalsz.mp_face_mesh, NoneType):
         globalsz.mp_face_mesh = mp.solutions.face_mesh
     if isinstance(globalsz.face_mesh, NoneType):
@@ -246,18 +253,19 @@ def extract_frames_from_video(target_video, output_folder):
     ]
     subprocess.run(ffmpeg_cmd, check=True)
 def add_audio_from_video(video_path, audio_video_path, output_path):
+    print(video_path)
     ffmpeg_cmd = [
         'ffmpeg',
         "-an",
-        '-i', video_path,
-        '-i', audio_video_path,
+        '-i', f'"{video_path}"',
+        '-i', f'"{audio_video_path}"',
         #'-c:v', 'copy',    # Copy video codec settings
         #'-c', 'copy',    # Copy audio codec settings
         '-map', '1:a:0?',
         '-map', '0:v:0',
         #'-acodec', 'copy',
         #'-shortest',
-        output_path
+        f'"{output_path}"'
     ]
     subprocess.run(ffmpeg_cmd, check=True)
 def merge_face(temp_frame, original, alpha):
@@ -438,7 +446,7 @@ class VideoCaptureThread:
             return frame
 
 
-def prepare_models(args):
+'''def prepare_models(args):
     providers = rt.get_available_providers()
     sess_options = rt.SessionOptions()
     sess_options.intra_op_num_threads = 8
@@ -458,7 +466,7 @@ def prepare_models(args):
     #face_analyser.models.pop("landmark_3d_68")
     #face_analyser.models.pop("landmark_2d_106")
     #face_analyser.models.pop("genderage")
-    return face_swapper, face_analyser
+    return face_swapper, face_analyser'''
 
 def upscale_image(image, generator ):
     image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
@@ -691,67 +699,146 @@ def create_batch_cap(file):
     return [cap, fps, width, height, out, name, file, frame_number]
 
 def create_new_cap(file, face_, output_,batch_post=""):
-    if globalsz.args['camera_fix'] == True:
-        cap = cv2.VideoCapture(file, cv2.CAP_DSHOW)
+    if not isinstance(file, int):
+        try:
+            video_type = mime.from_file(file)
+        except Exception as e:
+            print(f"{file} is not image or video, error from video_type: {e}")
+            return
     else:
-        cap = cv2.VideoCapture(file)
-    if isinstance(file, int):
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, globalsz.width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, globalsz.height)
-    fourcc = cv2.VideoWriter_fourcc(*'H265')
-    cap.set(cv2.CAP_PROP_FOURCC, fourcc)
-    # Get the video's properties
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    output_filename = os.path.basename(output_)
-    name = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}")
-    name_temp = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}_temp.mp4")#f"{args['output']}_temp{args['batch']}.mp4"
-    out = cv2.VideoWriter(name_temp, fourcc, fps, (width, height))
-    frame_number = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    #face_ = 
-    return {"type": 1,
-            "cap":cap,
-            "original_image":None,
-            "swapped_image":None,
-            "target_path":file,
-            "save_path":name,
-            "save_temp_path":name_temp,
-            "current_frame_index":isinstance(file, int),
-            "old_number":-1,
-            "frame_number":frame_number,
-            "rendering":False,
-            "width":width,
-            "height":height,
-            "fps":fps,
-            "faces_to_swap":None,
-            "settings":{
-                "threads":None,
-                "enable_swapper": not globalsz.args['no_faceswap'],
-                "enable_enhancer": False,
-                "enhancer_choice": "none",
-                "bbox_adjust": [50, 50, 50, 50],
-                "codeformer_fidelity":0.1,
-                "blender":1.0,
-                "codeformer_skip_if_no_face": False,
-                "codeformer_upscale_face": True,
-                "codeformer_enhancer_background": False,
-                "codeformer_upscale_amount":1,
-                },
-            "out_settings_for_resetting":{
-                "name_temp":name_temp,
-                "fourcc":fourcc,
-                "fps":fps,
+        video_type = 'video'
+    if video_type.startswith('video'):
+        if batch_post != "":
+            if not batch_post.endswith(".mp4"):
+                batch_post += ".mp4"
+        if globalsz.args['camera_fix'] == True:
+            cap = cv2.VideoCapture(file, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(file)
+        if isinstance(file, int):
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, globalsz.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, globalsz.height)
+        fourcc = cv2.VideoWriter_fourcc(*'H265')
+        cap.set(cv2.CAP_PROP_FOURCC, fourcc)
+        # Get the video's properties
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        output_filename = os.path.basename(output_)
+        name = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}")
+        name_temp = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}_temp.mp4")#f"{args['output']}_temp{args['batch']}.mp4"
+        out = cv2.VideoWriter(name_temp, fourcc, fps, (width, height))
+        frame_number = 1
+        if not isinstance(file, int):
+            frame_number = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        #face_ = 
+        return {"type": 1,
+                "cap":cap,
+                "original_image":None,
+                "swapped_image":None,
+                "target_path":file,
+                "save_path":name,
+                "save_temp_path":name_temp,
+                "current_frame_index":isinstance(file, int),
+                "old_number":-1,
+                "frame_number":frame_number,
+                "rendering":globalsz.args['cli'],
                 "width":width,
                 "height":height,
-            },
-            "out":out,
-            "count":-1,
-            "first_frame":get_nth_frame(cap, 0),
-            "temp": [],
-            "face":face_
-            }
+                "fps":fps,
+                "faces_to_swap":None,
+                "settings":{
+                    "threads":None,
+                    "enable_swapper": not globalsz.args['no_faceswap'],
+                    "enable_enhancer": False,
+                    "enhancer_choice": "none",
+                    "bbox_adjust": [50, 50, 50, 50],
+                    "codeformer_fidelity":0.1,
+                    "blender":1.0,
+                    "codeformer_skip_if_no_face": False,
+                    "codeformer_upscale_face": True,
+                    "codeformer_enhancer_background": False,
+                    "codeformer_upscale_amount":1,
+                    },
+                "out_settings_for_resetting":{
+                    "name_temp":name_temp,
+                    "fourcc":fourcc,
+                    "fps":fps,
+                    "width":width,
+                    "height":height,
+                },
+                "out":out,
+                "count":-1,
+                "first_frame":get_nth_frame(cap, 0),
+                "temp": [],
+                "face":face_
+                }
+    if video_type.startswith('image'):
+        if batch_post != "":
+            if not batch_post.endswith(".png"):
+                batch_post += ".png"
+        output_filename = os.path.basename(output_)
+        name = os.path.join(output_.rstrip(output_filename).rstrip(), f"{output_filename}{batch_post}")
+        image = cv2.imread(file)
+        width, height = image.shape[:2]
+        return {"type": 0,
+                "cap": None,
+                "original_image":image,
+                "swapped_image":None,
+                "target_path":file,
+                "save_path":name,
+                "save_temp_path":None,
+                "current_frame_index":0,
+                "old_number":-1,
+                "frame_number":-1,
+                "rendering":globalsz.args['cli'],
+                "width":width,
+                "height":height,
+                "fps":-1,
+                "faces_to_swap":None,
+                "settings":{
+                    "threads":None,
+                    "enable_swapper": not globalsz.args['no_faceswap'],
+                    "enable_enhancer": False,
+                    "enhancer_choice": "none",
+                    "bbox_adjust": [50, 50, 50, 50],
+                    "codeformer_fidelity":0.1,
+                    "blender":1.0,
+                    "codeformer_skip_if_no_face": False,
+                    "codeformer_upscale_face": True,
+                    "codeformer_enhancer_background": False,
+                    "codeformer_upscale_amount":1,
+                    },
+                "out_settings_for_resetting":None,
+                "out":None,
+                "count":-1,
+                "first_frame":image,#get_nth_frame(cap, 0),
+                "temp": [],
+                "face":face_}
+    print(video_type)
+def write_frame(video):
+    if video["type"] == 0:
+        print(video['save_path'])
+        cv2.imwrite(video['save_path'], video['swapped_image'])
+        return
+    video['out'].write(video["swapped_image"][:,:, :3])
+    return
+
+def get_frame(video, frame_index=-1, toret=False):
+    #if index == -1, just get the frame
+    if video['type'] == 0:
+        if toret:
+            return True, video["original_image"]
+        return video["original_image"]
+    if frame_index != -1:
+        return get_nth_frame(video['cap'], frame_index)
+    ret, frame = video['cap'].read()
+    if ret:
+        if toret:
+            return ret, frame
+        return frame
+    return ret, None
 
 def get_gpu_amount():
     num_devices = -1
@@ -787,6 +874,36 @@ def create_configs_for_onnx():
         'tunable_op_tuning_enable': 1
         }),'CPUExecutionProvider'
         ]
+        listx.append([idx, providers])
+    return listx
+def create_configs_for_onnx_rembg():
+    listx = []
+    gpu_amount = get_gpu_amount()
+    if gpu_amount == -1 and not globalsz.args['apple']:
+        return [('CPUExecutionProvider',),]
+    elif globalsz.args['apple']:
+        return [('CoreMLExecutionProvider',),]
+    gpu_list = list(range(gpu_amount))
+    if not globalsz.select_rembg_gpu == None:
+        gpu_list = globalsz.select_rembg_gpu
+    for idx in gpu_list:
+        providers = [('CUDAExecutionProvider', {
+            'device_id': idx,
+        #'gpu_mem_limit': 12 * 1024 * 1024 * 1024,
+        #'gpu_external_alloc': 0,
+        #'gpu_external_free': 0,
+        #'gpu_external_empty_cache': 1,
+        #'cudnn_conv_algo_search': 'EXHAUSTIVE',
+        #'cudnn_conv1d_pad_to_nc1d': 1,
+        #'arena_extend_strategy': 'kNextPowerOfTwo',
+        #'do_copy_in_default_stream': 1,
+        #'enable_cuda_graph': 0,
+        #'cudnn_conv_use_max_workspace': 1,
+        #'tunable_op_enable': 1,
+        #'enable_skip_layer_norm_strict_mode': 1,
+        #'tunable_op_tuning_enable': 1
+        }),'CPUExecutionProvider'
+        ]
         listx.append(providers)
     return listx
 
@@ -798,6 +915,51 @@ def get_sess_options():
     sess_options.execution_order = rt.ExecutionOrder.PRIORITY_BASED
     return sess_options
 
+def prepare_rembg(args):
+    global remove_bg, new_session
+    if isinstance(globalsz.rembg_models, NoneType):
+        if args['fastload']:
+            from rembg import remove as remove_bg
+            from rembg import new_session
+        provider_list = create_configs_for_onnx_rembg()
+        #sess_options = get_sess_options()
+        globalsz.rembg_models = []
+        #for idx, providers in enumerate(provider_list):
+        globalsz.rembg_models.append(new_session(globalsz.rembg_model))#, providers=providers))
+    #return rembg_models
+    
+def remove_background(frame,args, ct=0, magic = True):
+    global remove_bg
+    ct = 0
+    with globalsz.rembg_lock:
+        prepare_rembg(args)
+    # Convert frame to PNG bytes
+    _, buffer = cv2.imencode('.png', frame)
+    frame_bytes = buffer.tobytes()
+
+    # Remove background
+    output_bytes = remove_bg(frame_bytes, session=globalsz.rembg_models[ct], post_process_mask=True, bgcolor=globalsz.rembg_color)  # Make the background fully transparent for now
+
+    # Convert bytes back to a NumPy array
+    nparr = np.frombuffer(output_bytes, np.uint8)
+    output_frame = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+    if magic:
+        # Get the alpha channel
+        alpha_channel = output_frame[:, :, 3]
+
+        # Step 1: Dilate and Erode
+        kernel = np.ones((5,5), np.uint8)
+        alpha_channel = cv2.dilate(alpha_channel, kernel, iterations=1)
+        alpha_channel = cv2.erode(alpha_channel, kernel, iterations=1)
+
+        # Step 2: Blur and Threshold
+        alpha_channel = cv2.GaussianBlur(alpha_channel, (5, 5), 0)
+        _, alpha_channel = cv2.threshold(alpha_channel, 127, 255, cv2.THRESH_BINARY)
+
+        # Replace the alpha channel in the output frame
+        output_frame[:, :, 3] = alpha_channel
+    #print(output_frame.shape)
+    return output_frame
 
 def prepare_swappers_and_analysers(args):
     global get_model
@@ -805,30 +967,30 @@ def prepare_swappers_and_analysers(args):
     sess_options = get_sess_options()
     swappers = []
     analysers = []
-    for idx, providers in enumerate(provider_list):
+    for idx, (device_id, providers) in enumerate(provider_list):
         if not args['no_faceswap']:
             if args['optimization'] == "fp16":
                 
                 if globalsz.args['fastload']:
                     from swapperfp16 import get_model
-                swappers.append(get_model("inswapper_128.fp16.onnx", session_options=sess_options, providers=providers))
+                swappers.append(get_model("inswapper_128.fp16.onnx", argsz=args, session_options=sess_options, providers=providers))
             elif args['optimization'] == "int8":
                 if "CUDAExecutionProvider" in provider_list:
                     print("int8 may not work on gpu properly and might load your cpu instead")
                     
                 if globalsz.args['fastload']:
                     from swapperfp16 import get_model
-                swappers.append(get_model("inswapper_128.quant.onnx", session_options=sess_options, providers=providers))
+                swappers.append(get_model("inswapper_128.quant.onnx", argsz=args, session_options=sess_options, providers=providers))
             else:
                 
                 if globalsz.args['fastload']:
                     from swapperfp16 import get_model
-                swappers.append(get_model("inswapper_128.onnx", session_options=sess_options, providers=providers))
+                swappers.append(get_model("inswapper_128.onnx", argsz=args, session_options=sess_options, providers=providers))
         else: #insightface.model_zoo.
             swappers.append(None)
 
         analysers.append(insightface.app.FaceAnalysis(name='buffalo_l',allowed_modules=["recognition", "detection"], providers=providers, session_options=sess_options))
-        analysers[idx].prepare(ctx_id=0, det_size=(256, 256)) #640, 640
+        analysers[idx].prepare(ctx_id=0, det_size=(640, 640)) #640, 640
     return swappers, analysers
 
 def download(link, filename):
